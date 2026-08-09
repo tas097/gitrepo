@@ -1,4 +1,27 @@
-# Git & Terminal Cheat Sheet
+---
+
+## Branching & merging
+
+A branch is just a **named, movable pointer to a commit** — not a copy of files or history. One label on one commit, which slides forward as I commit on that branch.
+
+| Command | What it does |
+|---|---|
+| `git branch` | List branches (`*` marks the one I'm on) |
+| `git branch <name>` | Create a branch — makes a pointer, does **not** switch to it |
+| `git switch <name>` | Move `HEAD` onto a branch (older equivalent: `git checkout`) |
+| `git switch -c <name>` | Create a branch **and** switch to it in one step |
+| `git merge <name>` | Fold the named branch **into** the branch I'm currently on |
+| `git branch -d <name>` | Safe delete — removes only the label, and only if already merged |
+
+**Key ideas:**
+- Creating a branch ≠ switching to it — two separate actions.
+- Switching branches **rewrites my working files** to match that branch's commit — files physically change on disk.
+- To merge: stand on the **receiving** branch first, then merge the other one in. (Want `experiment`'s work on `main` → switch to `main`, then `git merge experiment`.)
+- **Fast-forward:** when the receiving branch has no work of its own since the split, Git just slides its pointer forward — no separate merge commit is created.
+- Deleting a merged branch removes only the pointer; every commit is safe on the branch it was merged into.
+- A merge done locally doesn't touch the remote — `origin/main` stays behind until I `git push`.
+
+**Everyday loop:** `git switch -c feature` → edit → `git add` → `git commit` → `git switch main` → `git merge feature` → `git push` → `git branch -d feature`.# Git & Terminal Cheat Sheet
 
 My working notes from learning Git from scratch. Ordered by mental model first, then commands, then the gotchas I actually hit.
 
