@@ -1,4 +1,41 @@
+### Branching — additions
+
+| Command | What it does |
+|---|---|
+| `git push -u origin <branch>` | **First** push of a *new* branch — sets its upstream. Bare `git push` fails on a new branch with "no upstream branch" until you do this once |
+| `git log --oneline --graph` | Draw the branch structure — shows forks splitting and merging as ASCII lines |
+| `git merge --abort` | Bail out of an in-progress merge and return to the state before it started |
+
+**Fast-forward vs merge commit:**
+- **Fast-forward** — when the receiving branch has no work of its own since the split, Git just slides its pointer forward. No new commit, straight-line history.
+- **Merge commit** — when both branches have diverged (each has commits the other doesn't), Git creates a special commit with **two parents**, one reaching back to each branch. This is the join point where two lines of history knit back together. A real merge of divergent work always makes one.
+
+**Editing files properly:** `echo "..." >> file` was a teaching device for single lines. For real multi-line edits, use a **text editor** — `code <file>` (VS Code) or `nano <file>` (in-terminal; save `^O`+Enter, exit `^X`). Saving edits box 1 (working directory), same as any change — then it's the usual `add` → `commit`.
+
 ---
+
+## Merge conflicts
+
+**What causes one:** two branches change the **same lines of the same file**, starting from the same point. Git can't fast-forward and **won't guess** which version wins — so it pauses the merge and hands the decision to me. A conflict is Git refusing to silently discard work, not Git breaking.
+
+**The five-step workflow:**
+
+1. **Merge** triggers it → `CONFLICT (content): Merge conflict in <file>` / `Automatic merge failed`.
+2. **Read** it → `git status` shows `Unmerged paths` / `both modified: <file>`. The repo is now paused mid-merge.
+3. **Resolve** it → open the file, edit it into the final version I want **by hand**, delete the marker lines.
+4. **Mark resolved** → `git add <file>`. This is how I *tell Git* the conflict is settled — editing the file alone isn't enough.
+5. **Complete the merge** → `git commit` (leave off `-m`; Git pre-fills a merge message — just save & close the editor). Creates the two-parent merge commit.
+
+**Conflict markers** — Git rewrites the file to show both versions:- `<<<<<<< HEAD` to `=======` → **my** side (the branch I'm on).
+- `=======` → the divider (not content).
+- `=======` to `>>>>>>> other-branch` → the **incoming** side.
+- Resolving = deleting the markers and leaving exactly the content I want. Final file has **no markers**. Free to keep either side or write a blend.
+
+**Key ideas:**
+- `git add` does double duty in a conflict: it stages the file *and* declares the conflict resolved.
+- While mid-merge, Git blocks other actions (`cannot switch branch while merging`, `merging is not possible... unmerged files`) — it holds me in place until I finish or `git merge --abort`.
+- Fast-forward = straight line, no merge commit. A conflict resolution = a diamond in `--graph`: split, then rejoin at the merge commit.
+- `-m` needs a value right after it — a bare `-m` errors with `switch 'm' requires a value`.---
 
 ## Branching & merging
 
