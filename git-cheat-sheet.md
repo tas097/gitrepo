@@ -217,3 +217,4 @@ Identity is baked into every commit's hash, so it's worth getting right.
 3. `working tree clean` = green light that everything's saved.
 4. Read the *absence* of output as information (empty `git remote -v` = no remotes).
 5. Amend/rewrite only before pushing.
+A placeholder for the pull request.
