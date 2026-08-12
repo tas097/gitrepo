@@ -1,4 +1,37 @@
-### Branching — additions
+## Pull requests (PRs) — the team workflow
+
+**What a PR is:** a *proposal* to merge one branch into another, opened **on GitHub**, that others can review and discuss before the merge happens. It is **not a git command** — there's no `git pull-request`. It's a GitHub feature wrapped around the ordinary branch-and-merge I already know. The Git half (branch, commit, push) is identical; the PR is what happens *next*, on the website.
+
+**Why bother (vs merging locally):** review catches problems before they hit `main`; the PR page is a permanent record of *why* a change was made; it's the hook automated tests hang on (Phase 2 — tests run on every PR); `main` stays protected — nothing lands except through a deliberate, reviewed merge.
+
+**The full round trip:**
+
+1. **Branch + work** — `git switch -c <branch>`, edit, `add`, `commit`. (Same as always.)
+2. **Push the branch** — `git push -u origin <branch>`. The key break from local merging: a PR needs the branch to **exist on GitHub** to open a request about. After pushing a *new* branch, GitHub prints a `Create a pull request... visiting: <url>` line it never shows for existing branches.
+3. **Open the PR** — that URL, or the "Compare & pull request" banner on the repo page.
+4. **Check the direction** — `base: main ← compare: <branch>`. Changes flow **from compare into base**. `base` = destination (gets modified), `compare` = source. Reversed = nothing to merge, or the wrong merge. Read it as a sentence every time; never memorise.
+5. **Review the diff** — green `+` = added lines, red `-` = removed. This *is* the content of the request. "Able to merge / No conflicts with base branch" = GitHub ran the same conflict-check I did by hand, pre-emptively, on the server.
+6. **Create + Merge** — title + description, "Create pull request", then "Merge pull request" → "Confirm merge". (Solo = I approve my own; on a team this may be locked until someone reviews / tests pass.)
+
+**Syncing local main afterwards** — the merge happened on GitHub's servers; **local `main` knows nothing** (Git is distributed — nothing syncs automatically; the `-u` pairing just records *where* to sync, it doesn't auto-sync):
+
+| Command | What it does |
+|---|---|
+| `git fetch` | Download new commits from `origin` and move the **remote-tracking pointer** (`origin/main`) — but **leave local `main` untouched**. "Tell me what's up there, don't touch my work." |
+| `git log --oneline --all` | Show every branch's pointer at once — here, reveals `main` and `origin/main` split apart after fetch. |
+| `git merge origin/main` | Merge the fetched commits into local `main`. Purely behind + no local work = **fast-forward**, no merge commit. |
+
+(`git pull` = `git fetch` + `git merge` in one step. Doing them separately here to *see* the two halves.)
+
+**Tidying up a merged branch:**
+
+| Command | What it does |
+|---|---|
+| `git branch -d <branch>` | Safe-delete the **local** branch label. Refuses if unmerged; fine once merged. Prints `was <hash>` as a receipt. |
+| `git push origin --delete <branch>` | Delete the branch **on the remote** (GitHub) — or use the "Delete branch" button on the merged PR. |
+| `git remote prune origin` | Remove local **remote-tracking pointers** (`origin/<branch>`) for branches that **no longer exist on the remote**. |
+
+**Prune is a diagnostic, not just cleanup:** if `git remote prune origin` *doesn't* remove `origin/<branch>`, that branch **still exists on GitHub**. It only prunes pointers to branches actually gone from the remote — so its silence tells me the remote branch is still there. Delete on the remote first, *then* prune has something to sweep.### Branching — additions
 
 | Command | What it does |
 |---|---|
@@ -218,3 +251,37 @@ Identity is baked into every commit's hash, so it's worth getting right.
 4. Read the *absence* of output as information (empty `git remote -v` = no remotes).
 5. Amend/rewrite only before pushing.
 A placeholder for the pull request.
+## Pull requests (PRs) — the team workflow
+
+**What a PR is:** a *proposal* to merge one branch into another, opened **on GitHub**, that others can review and discuss before the merge happens. It is **not a git command** — there's no `git pull-request`. It's a GitHub feature wrapped around the ordinary branch-and-merge I already know. The Git half (branch, commit, push) is identical; the PR is what happens *next*, on the website.
+
+**Why bother (vs merging locally):** review catches problems before they hit `main`; the PR page is a permanent record of *why* a change was made; it's the hook automated tests hang on (Phase 2 — tests run on every PR); `main` stays protected — nothing lands except through a deliberate, reviewed merge.
+
+**The full round trip:**
+
+1. **Branch + work** — `git switch -c <branch>`, edit, `add`, `commit`. (Same as always.)
+2. **Push the branch** — `git push -u origin <branch>`. The key break from local merging: a PR needs the branch to **exist on GitHub** to open a request about. After pushing a *new* branch, GitHub prints a `Create a pull request... visiting: <url>` line it never shows for existing branches.
+3. **Open the PR** — that URL, or the "Compare & pull request" banner on the repo page.
+4. **Check the direction** — `base: main ← compare: <branch>`. Changes flow **from compare into base**. `base` = destination (gets modified), `compare` = source. Reversed = nothing to merge, or the wrong merge. Read it as a sentence every time; never memorise.
+5. **Review the diff** — green `+` = added lines, red `-` = removed. This *is* the content of the request. "Able to merge / No conflicts with base branch" = GitHub ran the same conflict-check I did by hand, pre-emptively, on the server.
+6. **Create + Merge** — title + description, "Create pull request", then "Merge pull request" → "Confirm merge". (Solo = I approve my own; on a team this may be locked until someone reviews / tests pass.)
+
+**Syncing local main afterwards** — the merge happened on GitHub's servers; **local `main` knows nothing** (Git is distributed — nothing syncs automatically; the `-u` pairing just records *where* to sync, it doesn't auto-sync):
+
+| Command | What it does |
+|---|---|
+| `git fetch` | Download new commits from `origin` and move the **remote-tracking pointer** (`origin/main`) — but **leave local `main` untouched**. "Tell me what's up there, don't touch my work." |
+| `git log --oneline --all` | Show every branch's pointer at once — here, reveals `main` and `origin/main` split apart after fetch. |
+| `git merge origin/main` | Merge the fetched commits into local `main`. Purely behind + no local work = **fast-forward**, no merge commit. |
+
+(`git pull` = `git fetch` + `git merge` in one step. Doing them separately here to *see* the two halves.)
+
+**Tidying up a merged branch:**
+
+| Command | What it does |
+|---|---|
+| `git branch -d <branch>` | Safe-delete the **local** branch label. Refuses if unmerged; fine once merged. Prints `was <hash>` as a receipt. |
+| `git push origin --delete <branch>` | Delete the branch **on the remote** (GitHub) — or use the "Delete branch" button on the merged PR. |
+| `git remote prune origin` | Remove local **remote-tracking pointers** (`origin/<branch>`) for branches that **no longer exist on the remote**. |
+
+**Prune is a diagnostic, not just cleanup:** if `git remote prune origin` *doesn't* remove `origin/<branch>`, that branch **still exists on GitHub**. It only prunes pointers to branches actually gone from the remote — so its silence tells me the remote branch is still there. Delete on the remote first, *then* prune has something to sweep.
