@@ -159,6 +159,7 @@ A branch is just a **named, movable pointer to a commit** — not a copy of file
 | `git switch -c <name>` | Create a branch **and** switch to it in one step |
 | `git merge <name>` | Fold the named branch **into** the branch I'm currently on |
 | `git branch -d <name>` | Safe delete — removes only the label, and only if already merged |
+| `git branch -D <name>` | **Force** delete — bins the branch even if unmerged. For deliberately discarding an experiment |
 | `git push -u origin <branch>` | First push of a *new* branch — sets its upstream. Bare `git push` fails until this is done once |
 | `git merge --abort` | Bail out of an in-progress merge, back to the pre-merge state |
 
@@ -304,6 +305,7 @@ The **prompt** is context, never typed. bash shows `$`, zsh (default on modern m
 - **`403 Forbidden` ≠ `401 Unauthorized`.** 401 = "I don't know who you are" (bad credentials). 403 = "I know who you are, you're not allowed" (permission/scope). A 403 on push usually means the token lacks `repo` scope.
 - **Stale credentials in Keychain** — macOS caches the first token. After making a new one, delete the `github.com` entry in Keychain Access or Git keeps reusing the old broken one.
 - **Git Credential Manager** (`brew install --cask git-credential-manager`) stores credentials in Keychain and allows a browser (Google) login — authenticate once, no repeated prompts.
+- **`refusing to allow a Personal Access Token to create or update workflow ... without 'workflow' scope`** — pushing a `.github/workflows/*.yml` file needs the **`workflow`** scope, separate from `repo`. Authenticated but not authorised (the 403 family). Workflow files are *code GitHub executes on its own servers*, so a stolen token shouldn't be able to add one. Fix: tick `workflow` on the token (or regenerate with both `repo` and `workflow`), and clear the stale Keychain entry.
 
 ---
 
