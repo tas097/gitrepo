@@ -1,203 +1,216 @@
-# Python Project Setup — uv, packaging & the src layout
-
-Notes on standing up a Python project the reproducible way, using **uv**. The throughline of the whole MLOps roadmap: **ignore the result, commit the recipe** — anyone (or any server) should be able to rebuild the environment identically from what's in the repo.
+# Python Setup Cheat Sheet — uv & packaging
 
 ---
 
-## The anchor idea: isolation & reproducibility
+## The one idea: ignore the result, commit the recipe
 
-One global Python shared by every script is like committing straight to `main` with no branches — one project's package upgrade silently breaks another. The fix is to give each project its **own sealed environment**: its own Python version, its own packages, pinned to exact versions written down in files that live in the repo.
+```
+  COMMIT THIS (recipe)              IGNORE THIS (result)
+  ┌────────────────────┐            ┌────────────────────┐
+  │ pyproject.toml     │            │ .venv/             │
+  │ uv.lock            │ ──build──► │ 63 MB of packages  │
+  │ .python-version    │            │ machine-specific   │
+  │ ~5 KB of text      │            │ rebuildable        │
+  └────────────────────┘            └────────────────────┘
+```
 
-- **Ignore** the *result* — the installed packages (`.venv/`, machine-specific, tens/hundreds of MB).
-- **Commit** the *recipe* — `pyproject.toml` (what I asked for) and `uv.lock` (the exact resolved versions).
-
-Everything later in the roadmap (Docker, CI) exists to serve this one idea.
+Anyone — a colleague, a server, a Docker image — can rebuild the right side from the left side. That's "reproducible".
 
 ---
 
-## Vocabulary (these get used loosely — worth being precise)
+## Why isolate at all
+
+```
+  WITHOUT a virtual environment        WITH one
+
+  ┌─────────────────┐                  ┌──────────┐  ┌──────────┐
+  │  ONE global     │                  │ project A│  │ project B│
+  │  Python         │                  │ pandas   │  │ pandas   │
+  │  pandas 3.0.1   │                  │ 3.0.5    │  │ 2.1.0    │
+  └─────────────────┘                  └──────────┘  └──────────┘
+   ▲       ▲      ▲                      sealed        sealed
+   │       │      │
+  proj A  proj B  old notebook
+  upgrade one → break the others
+```
+
+**Proved on my own machine:**
+```
+  uv run python -c "import pandas; print(pandas.__version__)"   → 3.0.5
+  python3     -c "import pandas; print(pandas.__version__)"     → 3.0.1
+```
+Same laptop, same folder, two versions. Which Python you invoke decides what you get.
+
+---
+
+## Vocabulary
 
 | Term | Means |
 |---|---|
-| **Module** | A single `.py` file. `data.py` is a module. |
-| **Package** | A *folder* of modules with an `__init__.py` in it — that file is what marks the folder importable. |
-| **Import** | Python loading code from another module: `import pandas`, `from .data import load_sample_hires`. |
-| **Dependency** | A package my project needs (e.g. pandas). |
-| **Transitive dependency** | A dependency *of* a dependency (pandas needs NumPy). Installed, but not listed in my `pyproject.toml`. |
-| **Virtual environment** | A self-contained folder (`.venv`) holding a Python interpreter + exactly this project's packages. |
-| **Editable install** | The environment points back at my `src/` folder rather than holding a frozen copy — edits take effect immediately. |
-| **Entry point** | A terminal command created by config that runs one of my functions. |
+| **Module** | One `.py` file |
+| **Package** | A folder of modules with an `__init__.py` |
+| **Dependency** | A package my project needs (pandas) |
+| **Transitive dependency** | A dependency *of* a dependency (pandas needs NumPy) |
+| **Virtual environment** | `.venv` — a sealed folder: this project's Python + packages |
+| **Editable install** | The env points at my `src/`, not a frozen copy → edits apply instantly |
+| **Entry point** | A terminal command that runs one of my functions |
 
 ---
 
-## uv — one tool for three jobs
+## uv commands
 
-uv replaces the older `pyenv` + `pip` + `venv` stack with a single fast tool that manages **Python versions**, **virtual environments**, and **dependencies** together.
-
-| Command | What it does |
+| Command | Does |
 |---|---|
-| `uv --version` | Check uv is installed |
-| `uv init --package <name>` | Scaffold a new project with a **src layout** |
-| `uv sync` | Build/refresh `.venv` so it exactly matches `uv.lock` — what a *new machine* runs after cloning |
-| `uv add <pkg>` | Install a dependency **and** record it in `pyproject.toml` + `uv.lock` |
-| `uv remove <pkg>` | Remove a dependency and update the lock |
-| `uv run <cmd>` | Run a command inside the project's environment — **auto-syncs first**, so it builds/fixes `.venv` if needed |
+| `uv init --package <name>` | Scaffold a new project (src layout) |
+| `uv sync` | Build `.venv` to exactly match `uv.lock` |
+| `uv add <pkg>` | Install **+** record in `pyproject.toml` **+** update `uv.lock` |
+| `uv add --dev <pkg>` | Same, but into the dev group (doesn't ship) |
+| `uv remove <pkg>` | Remove and update the lock |
+| `uv run <cmd>` | Run inside the env — **auto-syncs first** |
+| `uv python pin 3.13` | Write `.python-version` |
 
-**Why `uv add` beats `pip install`:** `pip install pandas` installs it and *nothing else* — nothing in the repo records that the project needs pandas, so the next person to clone gets a broken project. `uv add pandas` does three things at once: installs it, adds it to `pyproject.toml`, updates `uv.lock`. The recipe stays honest automatically. That silent drift is the classic Python reproducibility failure.
+**`uv add` vs `pip install`:**
 
-**`uv run` is the everyday command.** No manual environment "activation" needed — it runs things inside the project environment and syncs first.
+```
+  pip install pandas     installs it ... and tells nobody
+                         repo has no record → next clone is broken
 
----
+  uv add pandas          installs it
+                         + writes pyproject.toml
+                         + writes uv.lock
+```
 
-## `pyproject.toml` vs `uv.lock` — intent vs exact reality
-
-Both are committed. They do different jobs:
-
-| File | Role | Written by | Contains |
-|---|---|---|---|
-| `pyproject.toml` | **What I asked for** — intent | Me (and `uv add`) | Direct dependencies only, usually as *ranges* (`pandas>=3.0.5`) |
-| `uv.lock` | **What was actually resolved** | uv, automatically | *Every* package incl. transitive ones, each pinned to one **exact** version |
-
-**Why both?** A range like `>=3.0.5` is deliberately flexible so I can upgrade later — but flexible means two people installing on different days could get *different* versions. The lockfile removes that ambiguity: `uv sync` six months from now rebuilds the identical environment rather than whatever's newest. **Intent in one file, exact reality in the other. That pair is what "reproducible" means in practice.**
-
-Commit them **together** — after `uv add`, `git status` shows `pyproject.toml` modified and `uv.lock` modified/untracked. Recipe and resolution travel as a pair.
+`uv run` is the everyday command — no "activating" environments.
 
 ---
 
-## Anatomy of `pyproject.toml`
+## pyproject.toml vs uv.lock
 
-| Section | What it's for |
-|---|---|
-| `[project]` | Name, version, description, `requires-python`, and the `dependencies` list |
-| `[project.scripts]` | **Entry points** — maps a terminal command to a `package:function` |
-| `[build-system]` | Declares the project *builds* into an installable package (uv's build backend) |
-| `[dependency-groups]` | Dev-only deps (e.g. test tools) kept separate from what ships |
+```
+  pyproject.toml                    uv.lock
+  "what I asked for"                "what actually got installed"
+  written by me                     written by uv
+  ┌──────────────────┐              ┌────────────────────────┐
+  │ pandas >= 3.0.5  │ ──resolve──► │ pandas   == 3.0.5      │
+  │                  │              │ numpy    == 2.3.1      │
+  │ a RANGE          │              │ tzdata   == 2025.2     │
+  │ (flexible)       │              │ ...12 packages, EXACT  │
+  └──────────────────┘              └────────────────────────┘
+```
 
-The `[build-system]` + `[project.scripts]` lines are the fingerprints of the `--package` src layout — a plain `uv init` wouldn't add them.
+A range means two people installing on different days could get different versions. The lock removes that doubt.
 
-**Entry points, concretely:**
+**Commit both, together.** After `uv add`, `git status` shows both modified.
+
+---
+
+## pyproject.toml sections
+
 ```toml
-[project.scripts]
-santander-cycles-forecast = "santander_cycles_forecast:main"
+[project]                 # name, version, requires-python, dependencies
+[project.scripts]         # entry points — terminal command → function
+[build-system]            # declares this builds into an installable package
+[dependency-groups]       # dev-only stuff (pytest) — doesn't ship
 ```
-Read as: *"create a terminal command `santander-cycles-forecast`; when run, import the package `santander_cycles_forecast` and call its `main` function."* The colon separates package from function. On install, uv generates a small executable in `.venv/bin/`.
 
-**Why this matters:** a *script* is run by knowing where the file is (`python some/path/script.py`). A *packaged* project is run **by name, from anywhere**, with no idea where the file lives — which is exactly how a server, container, or scheduler will invoke it later.
+**Entry points:**
+
+```
+  [project.scripts]
+  santander-cycles-forecast = "santander_cycles_forecast:main"
+   ▲                            ▲                         ▲
+   terminal command             package                   function
+```
+
+Reads as: *"make a command with this name; when run, import that package and call `main`."*
+
+Why it matters:
+```
+  a SCRIPT:   python /some/path/script.py     ← must know where the file is
+  a PACKAGE:  santander-cycles-forecast       ← run by name, from anywhere
+```
+That second form is how a server, container or scheduler will call it.
 
 ---
 
-## What `uv init --package` creates
+## The src layout
 
 ```
-santander-cycles-forecast/
-├── pyproject.toml        # the project's definition file
-├── README.md
-└── src/
-    └── santander_cycles_forecast/
-        └── __init__.py   # starter code with a main() stub
+  santander-cycles-forecast/
+  ├── pyproject.toml
+  ├── uv.lock
+  ├── .python-version
+  ├── README.md
+  ├── tests/                       ← NOT shipped
+  └── src/
+      └── santander_cycles_forecast/   ← hyphens become underscores
+          ├── __init__.py              (import names can't have hyphens)
+          ├── data.py
+          ├── features.py
+          └── api.py
 ```
 
-- **Hyphens → underscores:** the *project* name can have hyphens (`santander-cycles-forecast`), but the *package* folder can't — Python `import` names forbid them — so uv converts (`santander_cycles_forecast`).
-- **Git tracks files, not folders:** an empty folder is invisible to Git; it only sees the files inside — which is why the package needs that `__init__.py`.
+**Why the project installs itself.** Python looks for imports in two places:
+
+```
+  1. the folder I'm standing in  ──► src layout puts code OUT of reach here
+  2. the installed packages area ──► so this is the ONLY way in
+```
+
+That block is deliberate:
+
+```
+  code loose in root:  works because I happened to stand there  ← a trap
+  code in src/:        works only if genuinely installed        ← honest
+```
+
+The trap version breaks the moment you `cd` elsewhere, or run on a server.
+
+**Editable install** — proved it:
+```
+  cd ~
+  uv run --directory ~/projects/santander-cycles-forecast \
+         python -c "import santander_cycles_forecast as s; print(s.__file__)"
+
+  → /Users/fahad/projects/santander-cycles-forecast/src/.../__init__.py
+     ▲                                               ▲
+     worked from HOME = genuinely installed          points at MY src,
+                                                     not a copy in .venv
+                                                     = editable
+```
 
 ---
 
-## Why a project installs itself (the src layout payoff)
+## Module structure
 
-When I write `import santander_cycles_forecast`, Python searches a specific list of places: roughly **the folder I'm standing in**, then **the installed-packages area of the environment**. Not found there → `ModuleNotFoundError`.
-
-With a src layout, my code sits in `src/<package>/` — *not* in the folder I stand in. So "look around the current directory" **can't** find it. The only route in is for the project to be **installed** into the environment.
-
-**That block is deliberate.** Without `src/` (code loose in the root), imports work "for free" whenever I happen to be standing in that folder — which looks convenient and is a trap: the code appears to work, but only because of *where I was standing*. Move directory, or run it on a server or in Docker, and it breaks. The src layout makes that luck impossible: **if it imports, it's genuinely installed, and it'll behave the same anywhere.**
-
-uv installs it **editable** — a pointer back to `src/`, not a frozen copy. So proper installation *and* instant edits: new modules and code changes are picked up with no reinstall, no re-sync.
-
-**Proving both at once** — run from a totally unrelated directory:
-```
-cd ~
-uv run --directory ~/projects/<project> python -c "import <package>; print(<package>.__file__)"
-```
-- It **succeeding** from `~` proves the package is genuinely installed (location-independent).
-- `__file__` printing my real `src/...` path (not something inside `.venv/lib/.../site-packages/`) proves the install is **editable**.
-
----
-
-## Virtual environments in practice
-
-`.venv` is the project's sealed environment. It's in `.gitignore` — the *result*, not the *recipe*.
-
-**Seeing isolation for real:**
-```
-uv run python -c "import pandas; print(pandas.__version__)"   # project env  → 3.0.5
-python3 -c "import pandas; print(pandas.__version__)"         # global Python → 3.0.1
-```
-Same machine, same folder, **two different versions**, depending only on which Python was invoked. The project is pinned by `uv.lock` and unaffected by whatever's installed globally; equally, nothing done in the project can disturb the global one older notebooks rely on.
-
-Without this, one pandas serves everything: upgrading for this project silently breaks an old analysis, and code "works on my Mac" because of a version installed years ago — then fails on a server. That whole class of bug is what this eliminates.
-
-**Size check:** `du -sh .venv` (`-s` summarise to one total, `-h` human-readable). Empty env ≈ 116K (uv **symlinks** a shared interpreter rather than copying it). After `uv add pandas` ≈ 63M — a ~550× jump from one library. That number *is* the argument for `.gitignore`.
-
----
-
-## `.gitignore` — set up BEFORE the first commit
-
-A plain text file listing patterns Git should pretend it can't see. Lives in the **project root**, is itself a tracked file, and travels with the repo so everyone ignores the same junk.
-
-**Two rules that bite:**
-1. **`.gitignore` only stops *untracked* files.** Once a file is committed, adding it later does nothing. Set it up *before* the first commit.
-2. **`git add .` respects `.gitignore`.** The sweeping "add everything" is only safe *because* the ignore file exists. (It also never stages `.git` itself.)
-
-**A Python + macOS starter:**
-```
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-build/
-dist/
-
-# Virtual environment
-.venv/
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Secrets — NEVER commit
-.env
-
-# macOS
-.DS_Store
-
-# Editors
-.vscode/
-.idea/
-```
-Note what's **not** ignored: `uv.lock`. Ignore the result (`.venv/`), commit the recipe.
-
----
-
-## Module structure — separation of concerns
-
-One file is fine for a stub and wrong for a real project: everything can touch everything, and testing any piece means running the lot. Split so each module owns **one job**:
+One job per file:
 
 ```
-src/santander_cycles_forecast/
-├── __init__.py    # the "front door" — wiring + what the package exposes
-├── data.py        # loading raw TfL CSVs
-├── features.py    # reshaping into model-ready form
-└── model.py       # fitting and forecasting
+  src/santander_cycles_forecast/
+  ├── __init__.py   the "front door" — wiring + what's public
+  ├── data.py       loading CSVs
+  ├── features.py   reshaping
+  ├── model.py      fitting / forecasting
+  └── api.py        HTTP endpoints
 ```
 
-**Why it matters beyond tidiness:** `features.py` can be tested on its own in milliseconds — no data loading, no model fitting. **Untestable code is almost always code that hasn't been split up.** This is the prerequisite for Phase 2.
+Why, beyond tidiness: `features.py` can be tested alone in milliseconds — no data loading, no model fitting. **Untestable code is usually code that wasn't split up.**
 
-**Importing between my own modules** — two forms:
+**Importing between my own modules:**
 ```python
-from santander_cycles_forecast.data import load_sample_hires   # absolute — full path from package root
-from .data import load_sample_hires                            # relative — "." = the package I'm in
+from santander_cycles_forecast.data import load_sample_hires   # absolute
+from .data import load_sample_hires                            # relative — "." = my package
 ```
-Both work. **Relative is conventional inside a package** — tidier, and survives a package rename. Either only works because the package is properly installed.
+Relative inside the package (survives renames). **Absolute from `tests/`** — relative only works inside the package.
 
-**`__init__.py` as the front door.** Importing a name there attaches it to the **package**, not just that file:
+**`__init__.py` as the front door:**
+
+```
+  features.py ──┐
+                ├──► __init__.py ──► what the outside world sees
+  data.py     ──┘
+```
+
 ```python
 from .data import load_sample_hires
 from .features import total_by_station
@@ -205,93 +218,157 @@ from .features import total_by_station
 def main() -> None:
     print(total_by_station(load_sample_hires()))
 ```
-So `from santander_cycles_forecast import total_by_station` works even though it's *defined* in `features.py`. **`__init__.py` decides the public surface** — internal files can be renamed, split, or reorganised freely and nothing that depends on the package breaks. Keep it free of logic: imports plus a thin `main()`.
+
+Importing a name there attaches it to the **package**, so this works:
+```python
+from santander_cycles_forecast import total_by_station   # even though it lives in features.py
+```
+→ internal files can be renamed or split freely; nothing outside breaks.
 
 ---
 
-## Python bits worth remembering
-
-| Thing | Means |
-|---|---|
-| `import pandas as pd` | Load a library under a short alias (`pd` is universal convention) |
-| `def main() -> None:` | Define a function; `-> None` is a **type hint** — documentation for humans/tools, not enforced at runtime |
-| `"""Docstring."""` | Documentation attached to the function itself; tools can read it |
-| `print(f)` vs `print(f(x))` | `print(total_by_station)` shows `<function ... at 0x...>` — the function *object*. Add `(...)` to actually **call** it. Functions are values that can be passed around |
-| `python -c "..."` | Run a snippet of Python directly from the shell — handy for quick checks |
-| `df.groupby("station", as_index=False)["hires"].sum()` | pandas for SQL's `GROUP BY station, SUM(hires)`. `as_index=False` keeps `station` a normal column instead of moving it to the index |
-| The pandas **index** | The unlabelled leftmost `0,1,2…` column — row labels pandas maintains, *not* data. Later set to the date for time-series work |
-
-**Two error types that look alike but aren't:**
-- **`ModuleNotFoundError`** — Python couldn't find a package to import. An *environment* problem (not installed / wrong environment).
-- **`NameError: name 'x' is not defined`** — referred to a name that doesn't exist. A *typo or logic* problem in my code.
-
----
-
-## The Phase 0 → 1 sequence (end to end)
+## .gitignore
 
 ```
-# 1. Make a home for projects and move into it (NOT the home dir — see footgun below)
-mkdir -p ~/projects && cd ~/projects
+  # Python
+  __pycache__/
+  *.py[cod]
+  *.egg-info/
+  build/
+  dist/
 
-# 2. Scaffold with a src layout
-uv init --package santander-cycles-forecast
-cd santander-cycles-forecast
+  # Virtual environment
+  .venv/
 
-# 3. Version control — .gitignore FIRST, then the first commit
-git init
-# create/replace .gitignore (Python + macOS) before staging
-git add .
-git commit -m "Initialise project structure with uv (src layout) and Python .gitignore"
+  # Jupyter
+  .ipynb_checkpoints/
 
-# 4. Push to a NEW, EMPTY GitHub repo (no README / .gitignore / licence ticked)
-git remote add origin https://github.com/<user>/santander-cycles-forecast.git
-git push -u origin main
+  # Secrets — NEVER commit
+  .env
 
-# 5. Build the environment and add the first dependency
-uv sync
-uv add pandas
-git add pyproject.toml uv.lock && git commit -m "Add pandas dependency"
+  # macOS
+  .DS_Store
 
-# 6. Run it — two equivalent ways
-uv run python -c "from santander_cycles_forecast import main; main()"
-uv run santander-cycles-forecast          # via the [project.scripts] entry point
+  # Editors / tools
+  .vscode/
+  .idea/
+  .pytest_cache/
 ```
 
-Empty remote matters: a README on the remote creates a rival `root-commit`, giving two histories with no shared ancestor → `refusing to merge unrelated histories`. (Full explanation in the Git cheat sheet.)
+**Two rules:**
+1. It only stops **untracked** files. Once committed, adding it later does nothing → **set it up before the first commit**
+2. `git add .` is only safe **because** this exists
+
+**Not** ignored: `uv.lock` and `.python-version` — those are recipe.
 
 ---
 
-## The footgun: stray root markers at home
+## Pinning Python
 
-**Tools search *upward* from the current folder for their root marker** — Git looks for `.git`, uv looks for `pyproject.toml`. A stray marker at the home directory (`~`) poisons *every* project underneath it.
+```
+  pyproject.toml:    requires-python = ">=3.13"    ← intent (a range)
+  .python-version:   3.13                          ← exact reality
+```
+
+`uv.lock` pins packages but **not the interpreter**. Without the pin:
+
+```
+  my Mac:   Python 3.13.7
+  CI:       Python 3.14.7     ← newest matching ">=3.13"  ⚠️ not the same env
+```
+
+Fix: `uv python pin 3.13` → CI then ran 3.13.15. Pins the **series**, not the patch — right trade, since patches are just bug fixes.
+
+---
+
+## The footgun: stray markers at home
+
+Both Git and uv search **upward** for their root marker.
+
+```
+  ~/                      ← a stray .git or pyproject.toml HERE
+   ├── .git               poisons everything below
+   ├── pyproject.toml
+   └── projects/
+       └── my-project/    ← tools latch onto the wrong root
+```
 
 **Symptoms:**
-- `git status` lists my **entire home directory** with `../../` paths → an accidental `.git` at `~`.
-- `uv init` prints `Adding <project> as member of workspace '/Users/<me>'` → a stray `pyproject.toml` with a `[tool.uv.workspace]` block at `~`.
+- `git status` lists your whole home directory (`../../Downloads/`)
+- `uv init` says `Adding <project> as member of workspace '/Users/fahad'`
 
 **Diagnose (read-only):**
 ```
-ls -ld ~/.git            # accidental repo at home?
-cat ~/pyproject.toml     # stray workspace file? (look for [tool.uv.workspace])
+  ls -ld ~/.git
+  cat ~/pyproject.toml      # look for [tool.uv.workspace]
 ```
 
-**Fix — removes only the stray markers, never real files** (deleting a `.git` removes *history*, not documents; the loose uv files are pure scaffolding):
+**Fix** — removes only the markers, never real files:
 ```
-rm -rf ~/.git
-rm ~/pyproject.toml ~/uv.lock ~/.python-version
+  rm -rf ~/.git
+  rm ~/pyproject.toml ~/uv.lock ~/.python-version
 ```
-Then from inside the project, `git status` should report `fatal: not a git repository` — proof the upward search now finds nothing stray. Re-run `git init` **inside the project**.
 
-**Prevention:** always `pwd` before `git init` or `uv init`. Never run either in `~`.
+Then from the project, `git status` should say `fatal: not a git repository` — proof the upward search finds nothing. Now `git init` **inside the project**.
+
+**Prevention:** `pwd` before any `init`.
 
 ---
 
-## Habits worth keeping
+## Full setup sequence
 
-1. `pwd` before any `init` command — confirm the working directory first.
-2. `.gitignore` before the first commit, every time.
-3. Commit the recipe (`pyproject.toml`, `uv.lock`), ignore the result (`.venv/`).
-4. `uv add`, never `pip install` — keeps the recipe honest.
-5. `uv run <thing>` for everything — it syncs first, so the environment is never stale.
-6. One job per module; keep `__init__.py` as wiring only.
-7. Read a tool's first line of output — "member of workspace…", "root-commit", "unrelated histories" all say something about *where* it thinks it is.
+```
+  mkdir -p ~/projects && cd ~/projects
+  uv init --package santander-cycles-forecast
+  cd santander-cycles-forecast
+
+  # .gitignore FIRST
+  git init
+  git add .
+  git commit -m "Initialise project structure"
+
+  # EMPTY repo on GitHub, then:
+  git remote add origin https://github.com/<user>/<repo>.git
+  git push -u origin main
+
+  uv sync
+  uv add pandas
+  uv python pin 3.13
+  git add pyproject.toml uv.lock .python-version
+  git commit -m "Add pandas and pin Python"
+
+  # run it, two ways:
+  uv run python -c "from santander_cycles_forecast import main; main()"
+  uv run santander-cycles-forecast
+```
+
+---
+
+## Python bits
+
+| Thing | Means |
+|---|---|
+| `import pandas as pd` | Load under a short alias (universal convention) |
+| `def main() -> None:` | `-> None` is a **type hint** — documentation, not enforced |
+| `"""Docstring."""` | Documentation attached to the function |
+| `print(f)` vs `print(f(x))` | `f` shows `<function ... at 0x...>`; `f(x)` **calls** it |
+| `python -c "..."` | Run a snippet straight from the shell |
+| `df.groupby("station", as_index=False)["hires"].sum()` | SQL's `GROUP BY station, SUM(hires)` |
+| The pandas **index** | The unlabelled `0,1,2…` column — row labels, not data |
+
+**Two errors that look alike:**
+```
+  ModuleNotFoundError   → Python can't FIND the package   = environment problem
+  NameError             → that name doesn't exist         = typo in my code
+```
+
+---
+
+## Habits
+
+1. `pwd` before any `init`
+2. `.gitignore` before the first commit
+3. `uv add`, never `pip install`
+4. `uv run <thing>` for everything
+5. One job per module; `__init__.py` is wiring only
+6. Read a tool's first output line — it tells you where it thinks it is
